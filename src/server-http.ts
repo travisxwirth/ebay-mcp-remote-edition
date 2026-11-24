@@ -16,6 +16,7 @@ import {
   getConfiguredEnvironment,
   getHostedOauthScopes,
   getEbayConfig,
+  getIdentityBaseUrl,
   getOAuthAuthorizationUrl,
   getValidationRunnerUserId,
   validateCredentialsForEnvironment,
@@ -2967,6 +2968,34 @@ async function handleOAuthCallback(
     });
     const tokenData = await oauthClient.exchangeCodeForToken(code);
     await authStore.deleteOAuthState(state);
+
+    // ── Optional allowlist: only let specific eBay accounts sign in ──────
+    const allowedUsernames = (process.env.ALLOWED_EBAY_USERNAMES ?? '')
+      .split(',')
+      .map((u) => u.trim().toLowerCase())
+      .filter(Boolean);
+    if (allowedUsernames.length > 0) {
+      let ebayUsername = '';
+      try {
+        const identity = await axios.get<{ username?: string }>(
+          `${getIdentityBaseUrl(environment)}/commerce/identity/v1/user/`,
+          { headers: { Authorization: `Bearer ${tokenData.access_token}` }, timeout: 15000 }
+        );
+        ebayUsername = (identity.data.username ?? '').toLowerCase();
+      } catch (identityError) {
+        serverLogger.warn('[oauth/callback] Identity lookup failed for allowlist check', {
+          error: identityError instanceof Error ? identityError.message : String(identityError),
+        });
+      }
+      if (!ebayUsername || !allowedUsernames.includes(ebayUsername)) {
+        oauthClient.clearAllTokens();
+        serverLogger.warn('[oauth/callback] eBay account not in ALLOWED_EBAY_USERNAMES', {
+          ebayUsername: ebayUsername || '(unknown)',
+        });
+        res.status(403).send('This eBay account is not allowed to use this server.');
+        return;
+      }
+    }
     serverLogger.info('[oauth/callback] eBay token exchange successful', {
       userId,
       hasScope: !!tokenData.scope,
