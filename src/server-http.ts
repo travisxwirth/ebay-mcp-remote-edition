@@ -605,6 +605,14 @@ function getHostedEbayOAuthRedirectUri(
     return redirectUri || ebayConfig.ruName;
   }
 
+  // eBay's authorize and token endpoints require the RuName as redirect_uri;
+  // a raw callback URL is rejected with invalid_request. The RuName's
+  // "auth accepted URL" in the eBay Developer Portal points at /oauth/callback.
+  const ruName = ebayConfig.ruName?.trim();
+  if (ruName && !/^https?:\/\//i.test(ruName)) {
+    return ruName;
+  }
+
   const expectedCallbackUrl = getExpectedOAuthCallbackUrl(serverUrl);
   if (
     !redirectUri ||
